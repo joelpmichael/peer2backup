@@ -1,0 +1,187 @@
+Peer2Backup
+
+Emergency Key:
+
+Key pair used for restoring KeyDB in case of emergency.
+
+Private key kept offline except for restoring KeyDB.
+
+Private key split in half, with each half being stored in a different physical location.
+
+Private key pair half stored at least twice, e.g. once on USB key, once printed on paper, each half can be stored together.
+
+
+
+KeyDB:
+
+Private Key (password-protected) -> Pub Key
+
+Volume Private Key (no password) -> Volume PubKey
+
+Backed up after every change, or at least once per week, with report of backup location sent
+
+
+
+BackupDB:
+
+Pub Key -e-> Backup Data Metadata
+          -> File Hash
+          -> Hash Algorithm
+          -> Size
+          -> Backup Time
+
+Backed up after every backup, with report of backup location sent
+
+
+
+ChunkMapDB:
+
+File Hash -> Chunk Hash sequence
+
+
+
+VolumeMapDB:
+
+Chunk Hash -> Storage Volume ID & Volume Storage Hash
+
+
+
+Volume On Disk:
+
+GPT Partition map with Hybrid MBR
+
+Part 0 = FAT32, 65536 x 4096B sectors (256MiB), start offset 1048576B (1MiB)
+Contains README.TXT explaining what is on the disk
+
+Part 1 = MediaDB, 65280 x 4096B sectors (255MiB, start offset 269484032B (257MiB)
+Contains MediaDB with mapping of volume UUID to GPT Part Num on the disk
+
+Part 2..127 Volume, max 16777216 x 4096B sectors (64GiB, max 8TiB worth of volumes per disk)
+
+
+
+Volume On Tape:
+
+File 0 = README.TXT, 65536 x 4096b sectors (256MiB)
+explaining what is on the tape
+
+File 1 = MediaDB, 65280 x 4096b sectors (255MiB)
+Contains MediaDB with mapping of volume UUID to File Number on the tape
+
+File 2..N = Volume, max 16777216 x 4096b sectors (64GiB)
+
+
+
+Volume File:
+
+File on-disk containing a volume
+
+
+
+Volume:
+
+Bitmap-based file system with COW metadata DB
+
+4KiB sectors * 256 sectors per L3 block * 256 L3 per L2 block * 256 L2 per volume = max 64GiB per volume
+
+00,00,00:ff = unused (1MiB, allow for part table etc)
+-1,-1,00:ff = unused (1MiB, allow for GPT end of disk)
+
+00,01,00+0000 = L1,L2,L3 start of current VolumeDB Copy 1, 0x00
+00,01,00+0008 = L1,L2,L3 start of current VolumeDB Copy 2, 0x00
+00,01,00+0010 = L1,L2,L3 start of previous VolumeDB Copy 1, 0x00
+00,01,00+0018 = L1,L2,L3 start of previous VolumeDB Copy 2, 0x00
+
+-1/2,00,00+0000 = L1,L2,L3 start of current VolumeDB Copy 1, 0x00
+-1/2,00,00+0008 = L1,L2,L3 start of current VolumeDB Copy 2, 0x00
+-1/2,00,00+0010 = L1,L2,L3 start of previous VolumeDB Copy 1, 0x00
+-1/2,00,00+0018 = L1,L2,L3 start of previous VolumeDB Copy 2, 0x00
+
+-1,-2,ff+0000 = L1,L2,L3 start of current VolumeDB Copy 1, 0x00
+-1,-2,ff+0008 = L1,L2,L3 start of current VolumeDB Copy 2, 0x00
+-1,-2,ff+0010 = L1,L2,L3 start of previous VolumeDB Copy 1, 0x00
+-1,-2,ff+0018 = L1,L2,L3 start of previous VolumeDB Copy 2, 0x00
+
+
+
+VolumeDB:
+
+L1,L2,L3 start (0x00,0x00,0x00:0xff,0xff,0xff)
+
+0x00
+
+L1,L2,L3 end (0x00,0x00,0x00:0xff,0xff,0xff)
+
+0x00
+
+L1,L2,L3 next fragment start (0x00,0x00,0x00 = no more fragments)
+
+0x00
+
+Bytes Empty in Last Block (0x0000:0x0fff - 0x0000 = full 4096k block)
+
+0x0000 (16 Bytes for location, size & fragmentation)
+
+Write time in condensed ISO8601 format, UTC time zone (16 bytes)
+e.g. 20170826T011821Z
+This should be good for another 7900 years, but can add more in a future byte...
+
+0x00 x 32bytes (future reserved)
+
+SHA256 Checksum of chunk (32 bytes)
+
+SHA256 Checksum of stored data (32 bytes)
+
+Total 128 bytes per record
+
+Record 0x00: VolumeDB start, end, nextfrag, sha256 of volumedb with volumedb fragments checksum zeroed
+Record 0x01: Entire volume for size calc: start=00,00,00; end=size of volume to last full L3; no fragments; checksum zeroed
+Record 0x02: Reserved block 00,00,00:ff; checksum zeroed
+Record 0x03: Reserved block -1,-1,00:ff; checksum zeroed
+Record 0x04-7: For future use (reserved blocks) (zeroed)
+Record 0x08: Start of VolumeDB 00,01,00:00; checksum zeroed
+Record 0x09: Start of VolumeDB -1/2,00,00:00; checksum zeroed
+Record 0x0a: Start of VolumeDB -1,-2,ff:ff; checksum zeroed
+Record 0x0b-f: For future use (reserved blocks) (zeroed)
+Record 0x10: Volume metadata record copy 1
+Record 0x11: Volume metadata record copy 2
+Record 0x12-f: For future use (metadata records) (zeroed)
+
+
+
+Backup Data:
+
+                          Pub Key -e-> encryption (optional) -e-> Volume PubKey -e-> Encryption -> Storage
+Data -> 256MB Chunks -> Compression -^                         v- Chunk SHA256 Hash             v- Storage SHA256 Hash
+     v- File SHA256 Hash
+     v- Size
+     v- Metadata
+
+
+
+Restore Data:
+
+Verify Stored Data:
+
+Verify storage hash of stored chunk
+
+Verify Backup Data:
+
+Verify file hash of original file
+
+Move Disk To Peer:
+
+Encrypt Volume Private Key with Peer Public Key, transfer to peer for storage
+
+Backup To Peer:
+
+Local RO replicas of VolumeDB for devices attached to remote peer
+
+Backup To AmazonS3 (or compatible object store):
+
+Device is a single S3 bucket, data chunks as objects using hash for keys
+
+Backup To Swarm:
+
+BitTorrents of each backup chunk
+
