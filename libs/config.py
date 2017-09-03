@@ -22,14 +22,9 @@ def file(configfile):
         config['db']['path'] = DefaultConfigDbPath
 
     configdbpath = config['db'].get('path',DefaultConfigDbPath)
-
-    # seek to 0 in config file before config.write
-    # because config.read puts us at EOF
-    configfile.seek(0)
-
-    config.write(configfile)
-
-    configfile.close
+    with open(configfile, 'w') as cfgfile:
+        config.write(cfgfile)
+    cfgfile.close
 
     return configdbpath
 

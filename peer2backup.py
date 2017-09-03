@@ -13,7 +13,6 @@ import argparse
 parser = argparse.ArgumentParser(description='peer2backup background service')
 parser.add_argument('-c', '--config',
                     default=os.path.join(sys.path[0],'peer2backup.ini'),
-                    type=argparse.FileType('r+'),
                     help='Configuration File',
                    )
 args = parser.parse_args()
