@@ -16,6 +16,8 @@ KeyDB:
 
 Private Key (password-protected) -> Pub Key
 
+Client Private Key (encrypted with Public Key) -> Client Pub Key
+
 Volume Private Key (no password) -> Volume PubKey
 
 Backed up after every change, or at least once per week, with report of backup location sent
@@ -24,11 +26,10 @@ Backed up after every change, or at least once per week, with report of backup l
 
 BackupDB:
 
-Pub Key -e-> Backup Data Metadata
-          -> File Hash
-          -> Hash Algorithm
-          -> Size
-          -> Backup Time
+Client Pub Key -e-> Backup Data Metadata
+                 -> File Hash
+                 -> Size
+                 -> Backup Time
 
 Backed up after every backup, with report of backup location sent
 
@@ -37,6 +38,12 @@ Backed up after every backup, with report of backup location sent
 ChunkMapDB:
 
 File Hash -> Chunk Hash sequence
+
+
+
+ClientChunkDB:
+
+Client ID -> Chunk Hash
 
 
 

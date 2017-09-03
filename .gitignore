@@ -99,3 +99,8 @@ ENV/
 
 # mypy
 .mypy_cache/
+
+# peer2backup config files default paths
+peer2backup.ini
+config.sqlite
+
