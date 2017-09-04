@@ -17,5 +17,9 @@ parser.add_argument('-c', '--config',
                    )
 args = parser.parse_args()
 
+# load configuration
 import config
-configdb = config.db(config.file(args.config))
+configdb_path = config.file(args.config)
+configdb = config.db(configdb_path)
+
+# vim: tabstop=8 expandtab shiftwidth=4 softtabstop=4
