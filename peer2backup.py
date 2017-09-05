@@ -22,4 +22,6 @@ import config
 configdb_path = config.file(args.config)
 configdb = config.db(configdb_path)
 
+keydb_path = configdb.get('keydb.path', os.path.join(sys.path[0],'keydb.sqlite'))
+
 # vim: tabstop=8 expandtab shiftwidth=4 softtabstop=4

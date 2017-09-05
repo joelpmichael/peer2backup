@@ -1,5 +1,9 @@
 # -*- coding: utf_8 -*-
 
+# configdb
+# database of key=value pairs for configuration
+# values are stored as JSON for complex data type value storage
+
 import os
 import sys
 
@@ -14,9 +18,15 @@ ConfigDbVersion = 2017090101
 
 # reads config file to discover location of config database
 # default configdb is ./configdb.sqlite
+
+# db path should be only setting in config file
+# everything else should be in configdb
+
 def file(configfile):
 
     config = configparser.ConfigParser()
+
+    # default path to config db is ./configdb.sqlite
     DefaultConfigDbPath = os.path.join(sys.path[0],'configdb.sqlite')
 
     config.read(configfile)
@@ -32,31 +42,46 @@ def file(configfile):
 
     return configdbpath
 
+# main config db
 class db:
     def __init__(self,dbpath):
 
+        # create new DB if it doesn't exist
         if not os.path.isfile(dbpath):
             db_create(dbpath)
 
+        # connect to db
         self._conn = sqlite3.connect(dbpath)
+        self._conn.isolation_level = None
         c = self._conn.cursor()
+        # enable cell size checking
+        c.execute('PRAGMA cell_size_check = 1')
+        # optimize and quick-check on open
+        c.execute('PRAGMA quick_check')
+        CheckResult = c.fetchone()[0]
+        if CheckResult != 'ok':
+            raise ValueError("DB Check failed: " + CheckResult)
+        c.execute('PRAGMA optimize')
 
+        # check current db version against code version
+        # perform upgrade if necessary
         c.execute('PRAGMA user_version')
         CurrentDbVersion = c.fetchone()[0]
         if CurrentDbVersion < ConfigDbVersion:
-            self._conn.close
-            db_upgrade(dbpath, CurrentDbVersion)
-            self._conn = sqlite3.connect(dbpath)
-            c = self._conn.cursor()
+            self._upgrade(CurrentDbVersion)
 
     def set(self,key,val):
+        # set a configdb key to value
+        # blind-delete and insert to ensure that
+        # missing keys are added and duplicate keys (if any) are removed
         jsonval=json.dumps(val)
         c = self._conn.cursor()
         c.execute('DELETE FROM config WHERE cfg_key=?', (key,))
         c.execute('INSERT INTO config (cfg_key, cfg_value) VALUES (?, ?)', (key, jsonval,))
-        self._conn.commit()
 
     def get(self,key,defaultval):
+        # get a configdb value
+        # if the value doesn't exist, insert & return the default value
         c = self._conn.cursor()
         c.execute('SELECT cfg_value FROM config WHERE cfg_key=?', (key,))
         dbrow=c.fetchone()
@@ -66,64 +91,89 @@ class db:
             self.set(key,defaultval)
             return defaultval
 
-def db_upgrade(dbpath, CurrentDbVersion):
+    def _upgrade(self,CurrentDbVersion):
 
-    # CurrentDbVersion == 0 means DB is brand new
-    # If not brand new, back it up and perform full checks
-    if CurrentDbVersion > 0:
+        # connect to DB handle
+        c = self._conn.cursor()
 
-        # back up DB before modifying
-        backupdbpath = dbpath + '-backup-v' + str(CurrentDbVersion)
-        shutil.copyfile(dbpath, backupdbpath)
+        # CurrentDbVersion == 0 means DB is brand new
+        # If not brand new, back it up and perform full checks
+        if CurrentDbVersion > 0:
 
-        # connect to DB
-        conn = sqlite3.connect(dbpath)
-        c = conn.cursor()
+            c.execute('PRAGMA database_list')
+            dbpath = c.fetchone()[2]
+            print(dbpath)
 
-        # perform integrity check
-        c.execute('PRAGMA integrity_check')
-        CheckResult = c.fetchone()[0]
-        if CheckResult != 'ok':
-            raise ValueError("DB Check failed: " + CheckResult)
+            # back up DB before modifying
+            # lock the entire DB
+            # see https://sqlite.org/pragma.html#pragma_locking_mode
 
-        conn.close
+            c.execute('PRAGMA locking_mode = EXCLUSIVE')
+            # write some data to obtain an exclusive lock
+            c.execute('CREATE TABLE __temp_upgrade (temp INT)')
+            c.execute('INSERT INTO __temp_upgrade (temp) values (1)')
+            c.execute('DROP TABLE __temp_upgrade')
+            c.execute('PRAGMA query_only = 1')
 
-    # connect to DB to perform upgrades
-    conn = sqlite3.connect(dbpath)
-    c = conn.cursor()
+            # copy DB file while we have an exclusive lock
+            backupdbpath = dbpath + '-backup-v' + str(CurrentDbVersion)
+            shutil.copyfile(dbpath, backupdbpath)
 
-    # perform upgrades
-    # IMPORTANT: upgrades are performed IN ORDER
-    # remember to set CurrentDbVersion to the new version
+            # unlock & write again to release exclusive lock
+            c.execute('PRAGMA query_only = 0')
+            c.execute('PRAGMA locking_mode = NORMAL')
+            c.execute('CREATE TABLE __temp_upgrade (temp INT)')
+            c.execute('INSERT INTO __temp_upgrade (temp) values (1)')
+            c.execute('DROP TABLE __temp_upgrade')
+
+            # perform integrity check
+            c.execute('PRAGMA integrity_check')
+            CheckResult = c.fetchone()[0]
+            if CheckResult != 'ok':
+                raise ValueError("DB Check failed: " + CheckResult)
+
+        # perform upgrades
+        # IMPORTANT: upgrades are performed IN ORDER
+        # remember to set CurrentDbVersion to the new version
     
-    # Example:
-    #if CurrentDbVersion < 2017090101:
-    #    c.execute('CREATE TABLE foo(bar INT, baz TEXT)')
-    #    c.execute('PRAGMA user_version = 2017090101')
-    #    CurrentDbVersion = 2017090101
-    #
-    #if CurrentDbVersion < 2017090102:
-    #    c.execute('alter table foo add column blah text')
-    #    c.execute('PRAGMA user_version = 2017090102')
-    #    CurrentDbVersion = 2017090102
+        # Example:
+        #if CurrentDbVersion < 2017090101:
+        #    c.execute('CREATE TABLE foo(bar INT, baz TEXT)')
+        #    c.execute('PRAGMA user_version = 2017090101')
+        #    CurrentDbVersion = 2017090101
+        #
+        #if CurrentDbVersion < 2017090102:
+        #    c.execute('alter table foo add column blah text')
+        #    c.execute('PRAGMA user_version = 2017090102')
+        #    CurrentDbVersion = 2017090102
 
-    if CurrentDbVersion < 2017090101:
-        c.execute('CREATE TABLE config(cfg_key TEXT PRIMARY KEY NOT NULL, cfg_value TEXT)')
-        c.execute('PRAGMA user_version = 2017090101')
-        conn.commit()
-        CurrentDbVersion = 2017090101
+        # version 2017090101
+        # initial version
+        # simple key,value table
+        if CurrentDbVersion < 2017090101:
+            c.execute('CREATE TABLE config (cfg_key TEXT PRIMARY KEY NOT NULL, cfg_value TEXT)')
+            c.execute('PRAGMA user_version = 2017090101')
+            CurrentDbVersion = 2017090101
 
-    # full vacuum of DB, while we're doing maintenance
-    c.execute('VACUUM')
-    conn.close
-
+        # End of upgrades, run an optimize and vacuum too
+        c.execute('PRAGMA optimize')
+        c.execute('VACUUM')
 
 def db_create(dbpath):
 
     conn = sqlite3.connect(dbpath)
+    conn.isolation_level = None
     c = conn.cursor()
-    c.execute('PRAGMA user_version = 0')
-    conn.commit()
+    # set initial version to 0
+    c.execute('PRAGMA user_version = 1')
+    # enable cell size checking
+    c.execute('PRAGMA cell_size_check = 1')
+    # set 4k page size
+    c.execute('PRAGMA page_size = 4096')
+    # set UTF-8 encoding
+    c.execute('PRAGMA encoding = "UTF-8"')
+    # vacuum to make page size stick
+    c.execute('VACUUM')
     conn.close
 
 # vim: tabstop=8 expandtab shiftwidth=4 softtabstop=4

@@ -105,6 +105,6 @@ ENV/
 .DS_Store
 
 # peer2backup config files default paths
-peer2backup.ini
-config.sqlite
-
+*.ini
+*.sqlite
+*-backup-v*
