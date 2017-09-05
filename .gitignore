@@ -104,6 +104,9 @@ ENV/
 *.xcodeproj
 .DS_Store
 
+# vim temp files
+*.swp
+
 # peer2backup config files default paths
 *.ini
 *.sqlite
