@@ -4,6 +4,8 @@
 # database of key=value pairs for configuration
 # values are stored as JSON for complex data type value storage
 
+# FIXME - error handling!
+
 import os
 import sys
 
@@ -165,7 +167,8 @@ def db_create(dbpath):
     conn.isolation_level = None
     c = conn.cursor()
     # set initial version to 0
-    c.execute('PRAGMA user_version = 1')
+    # so first upgrade doesn't bother backing up
+    c.execute('PRAGMA user_version = 0')
     # enable cell size checking
     c.execute('PRAGMA cell_size_check = 1')
     # set 4k page size

@@ -9,11 +9,10 @@ sys.path.append(os.path.join(sys.path[0],'libs'))
 
 # handle arguments
 import argparse
-
 parser = argparse.ArgumentParser(description='peer2backup background service')
 parser.add_argument('-c', '--config',
-                    default=os.path.join(sys.path[0],'peer2backup.ini'),
-                    help='Configuration File',
+                   default=os.path.join(sys.path[0],'peer2backup.ini'),
+                   help='Configuration File',
                    )
 args = parser.parse_args()
 
@@ -22,6 +21,7 @@ import config
 configdb_path = config.file(args.config)
 configdb = config.db(configdb_path)
 
-keydb_path = configdb.get('keydb.path', os.path.join(sys.path[0],'keydb.sqlite'))
+import key
+keydb_path = configdb.get('keydb.path',os.path.join(sys.path[0],'configdb.sqlite'))
 
 # vim: tabstop=8 expandtab shiftwidth=4 softtabstop=4
