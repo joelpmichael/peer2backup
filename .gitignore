@@ -104,6 +104,9 @@ ENV/
 *.xcodeproj
 .DS_Store
 
+# Visual Studio Project
+.vs
+
 # vim temp files
 *.swp
 
