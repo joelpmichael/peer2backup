@@ -15,8 +15,8 @@ import sqlite3
 import shutil
 import json
 
-# increment ConfigDbVersion on DB schema changes
-ConfigDbVersion = 2017090101
+# increment configdb_version on DB schema changes
+configdb_version = 2017090101
 
 # reads config file to discover location of config database
 # default configdb is ./configdb.sqlite
@@ -24,28 +24,28 @@ ConfigDbVersion = 2017090101
 # db path should be only setting in config file
 # everything else should be in configdb
 
-def file(configfile):
+def File(configfile):
 
     config = configparser.ConfigParser()
 
     # default path to config db is ./configdb.sqlite
-    DefaultConfigDbPath = os.path.join(sys.path[0],'configdb.sqlite')
+    default_configdb_path = os.path.join(sys.path[0],'configdb.sqlite')
 
     config.read(configfile)
 
     if not 'db' in config:
         config['db'] = {}
-        config['db']['path'] = DefaultConfigDbPath
+        config['db']['path'] = default_configdb_path
 
-    configdbpath = config['db'].get('path',DefaultConfigDbPath)
+    configdb_path = config['db'].get('path',default_configdb_path)
     with open(configfile, 'w') as cfgfile:
         config.write(cfgfile)
     cfgfile.close
 
-    return configdbpath
+    return configdb_path
 
 # main config db
-class db:
+class ConfigDb:
     def __init__(self,dbpath):
 
         # create new DB if it doesn't exist
@@ -60,19 +60,19 @@ class db:
         c.execute('PRAGMA cell_size_check = 1')
         # optimize and quick-check on open
         c.execute('PRAGMA quick_check')
-        CheckResult = c.fetchone()[0]
-        if CheckResult != 'ok':
-            raise ValueError("DB Check failed: " + CheckResult)
+        check_result = c.fetchone()[0]
+        if check_result != 'ok':
+            raise ValueError("DB Check failed: " + check_result)
         c.execute('PRAGMA optimize')
 
         # check current db version against code version
         # perform upgrade if necessary
         c.execute('PRAGMA user_version')
-        CurrentDbVersion = c.fetchone()[0]
-        if CurrentDbVersion < ConfigDbVersion:
-            self._upgrade(CurrentDbVersion)
+        current_db_version = c.fetchone()[0]
+        if current_db_version < configdb_version:
+            self._Upgrade(current_db_version)
 
-    def set(self,key,val):
+    def Set(self,key,val):
         # set a configdb key to value
         # blind-delete and insert to ensure that
         # missing keys are added and duplicate keys (if any) are removed
@@ -81,7 +81,7 @@ class db:
         c.execute('DELETE FROM config WHERE cfg_key=?', (key,))
         c.execute('INSERT INTO config (cfg_key, cfg_value) VALUES (?, ?)', (key, jsonval,))
 
-    def get(self,key,defaultval):
+    def Get(self,key,defaultval):
         # get a configdb value
         # if the value doesn't exist, insert & return the default value
         c = self._conn.cursor()
@@ -90,17 +90,17 @@ class db:
         if dbrow:
             return json.loads(dbrow[0])
         else:
-            self.set(key,defaultval)
+            self.Set(key,defaultval)
             return defaultval
 
-    def _upgrade(self,CurrentDbVersion):
+    def _Upgrade(self,current_db_version):
 
         # connect to DB handle
         c = self._conn.cursor()
 
-        # CurrentDbVersion == 0 means DB is brand new
+        # current_db_version == 0 means DB is brand new
         # If not brand new, back it up and perform full checks
-        if CurrentDbVersion > 0:
+        if current_db_version > 0:
 
             c.execute('PRAGMA database_list')
             dbpath = c.fetchone()[2]
@@ -118,7 +118,7 @@ class db:
             c.execute('PRAGMA query_only = 1')
 
             # copy DB file while we have an exclusive lock
-            backupdbpath = dbpath + '-backup-v' + str(CurrentDbVersion)
+            backupdbpath = dbpath + '-backup-v' + str(current_db_version)
             shutil.copyfile(dbpath, backupdbpath)
 
             # unlock & write again to release exclusive lock
@@ -130,32 +130,32 @@ class db:
 
             # perform integrity check
             c.execute('PRAGMA integrity_check')
-            CheckResult = c.fetchone()[0]
-            if CheckResult != 'ok':
-                raise ValueError("DB Check failed: " + CheckResult)
+            check_result = c.fetchone()[0]
+            if check_result != 'ok':
+                raise ValueError("DB Check failed: " + check_result)
 
         # perform upgrades
         # IMPORTANT: upgrades are performed IN ORDER
-        # remember to set CurrentDbVersion to the new version
+        # remember to set current_db_version to the new version
     
         # Example:
-        #if CurrentDbVersion < 2017090101:
+        #if current_db_version < 2017090101:
         #    c.execute('CREATE TABLE foo(bar INT, baz TEXT)')
         #    c.execute('PRAGMA user_version = 2017090101')
-        #    CurrentDbVersion = 2017090101
+        #    current_db_version = 2017090101
         #
-        #if CurrentDbVersion < 2017090102:
+        #if current_db_version < 2017090102:
         #    c.execute('alter table foo add column blah text')
         #    c.execute('PRAGMA user_version = 2017090102')
-        #    CurrentDbVersion = 2017090102
+        #    current_db_version = 2017090102
 
         # version 2017090101
         # initial version
         # simple key,value table
-        if CurrentDbVersion < 2017090101:
+        if current_db_version < 2017090101:
             c.execute('CREATE TABLE config (cfg_key TEXT PRIMARY KEY NOT NULL, cfg_value TEXT)')
             c.execute('PRAGMA user_version = 2017090101')
-            CurrentDbVersion = 2017090101
+            current_db_version = 2017090101
 
         # End of upgrades, run an optimize and vacuum too
         c.execute('PRAGMA optimize')

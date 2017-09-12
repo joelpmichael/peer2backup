@@ -5,13 +5,20 @@
 import os
 import sqlite3
 import shutil
-import gnupg
+
+import uuid
+import random
+
+import Crypto.PublicKey.RSA
+import Crypto.Random.random
+import Crypto.Cipher.PKCS1_OAEP
+import Crypto.Hash.SHA256
 
 # increment ConfigDbVersion on DB schema changes
-KeyDbVersion = 2017090101
+keydb_version = 2017090101
 
 # main key db
-class keydb:
+class KeyDb:
     def __init__(self,dbpath):
 
         # create new DB if it doesn't exist
@@ -26,26 +33,69 @@ class keydb:
         c.execute('PRAGMA cell_size_check = 1')
         # optimize and quick-check on open
         c.execute('PRAGMA quick_check')
-        CheckResult = c.fetchone()[0]
-        if CheckResult != 'ok':
-            raise ValueError("DB Check failed: " + CheckResult)
+        check_result = c.fetchone()[0]
+        if check_result != 'ok':
+            raise ValueError("DB Check failed: " + check_result)
         c.execute('PRAGMA optimize')
 
         # check current db version against code version
         # perform upgrade if necessary
         c.execute('PRAGMA user_version')
-        CurrentDbVersion = c.fetchone()[0]
-        if CurrentDbVersion < ConfigDbVersion:
-            self._upgrade(CurrentDbVersion)
+        current_db_version = c.fetchone()[0]
+        if current_db_version < keydb_version:
+            self._Upgrade(current_db_version)
 
-    def _upgrade(self,CurrentDbVersion):
+    def New(self,parent_key_id=None,bits=2048,password=None,expiry='+2 years'):
+        c = self._conn.cursor()
+        new_uuid = str(uuid.uuid4())
+        key_priv = Crypto.PublicKey.RSA.generate(bits)
+        key_pub = key_priv.publickey()
+
+        c.execute('DELETE FROM pubkey WHERE key_id=?', (new_uuid,))
+        c.execute('DELETE FROM privkey WHERE key_id=?', (new_uuid,))
+        c.execute('INSERT INTO pubkey (key_id, key_expiry, key) \
+                VALUES (?, datetime(\'now\', ?), ?)',
+                (new_uuid, expiry, key_pub.exportKey(),)
+                )
+        c.execute('INSERT INTO privkey (key_id, key_unlock_key_id, key_unlock_password, key) \
+                VALUES (?, ?, ?, ?)',
+                (new_uuid, parent_key_id, None, key_priv.exportKey(passphrase=password),)
+                )
+
+        return new_uuid
+    
+    def Del(self,key_id):
+        pass
+
+    def Check(self,key_id):
+        pass
+
+    def ImportPubkey(self,key_id,key):
+        pass
+
+    def ExportPubkey(self,key_id):
+        pass
+
+    def Encrypt(self,key_id,data):
+        pass
+
+    def Decrypt(self,key_id,password,data):
+        pass
+
+    def Sign(self,key_id,password,data):
+        pass
+
+    def Verify(self,key_id,data):
+        pass
+
+    def _Upgrade(self,current_db_version):
 
         # connect to DB handle
         c = self._conn.cursor()
 
-        # CurrentDbVersion == 0 means DB is brand new
+        # current_db_version == 0 means DB is brand new
         # If not brand new, back it up and perform full checks
-        if CurrentDbVersion > 0:
+        if current_db_version > 0:
 
             c.execute('PRAGMA database_list')
             dbpath = c.fetchone()[2]
@@ -64,7 +114,7 @@ class keydb:
             c.execute('PRAGMA query_only = 1')
 
             # copy DB file while we have an exclusive lock
-            backupdbpath = dbpath + '-backup-v' + str(CurrentDbVersion)
+            backupdbpath = dbpath + '-backup-v' + str(current_db_version)
             shutil.copyfile(dbpath, backupdbpath)
 
             # unlock & write again to release exclusive lock
@@ -77,37 +127,71 @@ class keydb:
 
             # perform integrity check
             c.execute('PRAGMA integrity_check')
-            CheckResult = c.fetchone()[0]
-            if CheckResult != 'ok':
-                raise ValueError("DB Check failed: " + CheckResult)
+            check_result = c.fetchone()[0]
+            if check_result != 'ok':
+                raise ValueError("DB Check failed: " + check_result)
 
         # perform upgrades
         # IMPORTANT: upgrades are performed IN ORDER
-        # remember to set CurrentDbVersion to the new version
+        # remember to set current_db_version to the new version
     
         # Example:
-        #if CurrentDbVersion < 2017090101:
+        #if current_db_version < 2017090101:
         #    c.execute('CREATE TABLE foo(bar INT, baz TEXT)')
         #    c.execute('PRAGMA user_version = 2017090101')
-        #    CurrentDbVersion = 2017090101
+        #    current_db_version = 2017090101
         #
-        #if CurrentDbVersion < 2017090102:
+        #if current_db_version < 2017090102:
         #    c.execute('alter table foo add column blah text')
         #    c.execute('PRAGMA user_version = 2017090102')
-        #    CurrentDbVersion = 2017090102
+        #    current_db_version = 2017090102
 
         # version 2017090101
         # initial version
         # simple key,value table
-        if CurrentDbVersion < 2017090101:
-            c.execute('CREATE TABLE privkey (key_id TEXT PRIMARY KEY NOT NULL, key TEXT, key_unlock_key_id TEXT, key_unlock_password TEXT, key_unlock_salt TEXT)')
+        if current_db_version < 2017090101:
+            c.execute('CREATE TABLE privkey (key_id TEXT PRIMARY KEY NOT NULL, key TEXT, key_unlock_key_id TEXT, key_unlock_password TEXT)')
             c.execute('CREATE TABLE pubkey (key_id TEXT PRIMARY KEY NOT NULL, key TEXT, key_expiry TEXT)')
             c.execute('PRAGMA user_version = 2017090101')
-            CurrentDbVersion = 2017090101
+            current_db_version = 2017090101
 
         # End of upgrades, run an optimize and vacuum too
         c.execute('PRAGMA optimize')
         c.execute('VACUUM')
+
+# in-memory password storage scrambling function for key passwords
+class KeyPw:
+    def __init__(self):
+        # possible characters for randomly-generated passwords (typable ASCII)
+        self.pwchars = list('! #$%&()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[]^_`abcdefghijklmnopqrstuvwxyz{|}~')
+
+        # create RSA key pair to use during this session to encrypt key passwords
+        self._session_key_priv = Crypto.PublicKey.RSA.generate(1024)
+        self._session_key_pub = self._session_key_priv.publickey()
+
+    def New(self,length=32):
+        # generate password of length (default 32) characters from list in self.pwchars
+        # max length is 128 characters (1024 bits in session RSA key)
+        maxbytes = self._session_key_priv.size() / 8
+        if length > maxbytes:
+            raise ValueError("Length must not be larger than RSA key size")
+
+        new_password = []
+        for i in range(length):
+            new_password.append(Crypto.Random.random.choice(self.pwchars))
+        newpw = ''.join(new_password)
+        return newpw.encode('utf-8')
+
+    def SessionEncrypt(self,plainpw):
+        cipher = Crypto.Cipher.PKCS1_OAEP.new(self._session_key_pub, hashAlgo=Crypto.Hash.SHA256)
+        # need to encode to UTF-8 as cipher.encrypt works on byte objects
+        message = cipher.encrypt(plainpw)
+        return message
+
+    def SessionDecrypt(self,encpw):
+        cipher = Crypto.Cipher.PKCS1_OAEP.new(self._session_key_priv, hashAlgo=Crypto.Hash.SHA256)
+        message = cipher.decrypt(encpw)
+        return message
 
 def db_create(dbpath):
 

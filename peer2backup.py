@@ -18,10 +18,19 @@ args = parser.parse_args()
 
 # load configuration
 import config
-configdb_path = config.file(args.config)
-configdb = config.db(configdb_path)
+configdb_path = config.File(args.config)
+configdb = config.ConfigDb(configdb_path)
 
 import key
-keydb_path = configdb.get('keydb.path',os.path.join(sys.path[0],'configdb.sqlite'))
+keydb_path = configdb.Get('keydb.path',os.path.join(sys.path[0],'keydb.sqlite'))
+keydb = key.KeyDb(keydb_path)
+
+keypw = key.KeyPw()
+
+master_key_id = configdb.Get('keydb.master.id',None)
+
+if not master_key_id:
+    master_key_id = keydb.New(None, bits=4096, password=None, expiry="+30 years")
+    configdb.Set('keydb.master.id',str(master_key_id))
 
 # vim: tabstop=8 expandtab shiftwidth=4 softtabstop=4
