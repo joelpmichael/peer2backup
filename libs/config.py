@@ -104,7 +104,6 @@ class ConfigDb:
 
             c.execute('PRAGMA database_list')
             dbpath = c.fetchone()[2]
-            print(dbpath)
 
             # back up DB before modifying
             # lock the entire DB

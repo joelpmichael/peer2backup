@@ -8,6 +8,7 @@ import shutil
 
 import uuid
 import random
+import base64
 
 import Crypto.PublicKey.RSA
 import Crypto.Random.random
@@ -50,6 +51,9 @@ class KeyDb:
         new_uuid = str(uuid.uuid4())
         key_priv = Crypto.PublicKey.RSA.generate(bits)
         key_pub = key_priv.publickey()
+        store_password = None
+        if parent_key_id:
+            store_password = base64.standard_b64encode(self.Encrypt(parent_key_id,password))
 
         c.execute('DELETE FROM pubkey WHERE key_id=?', (new_uuid,))
         c.execute('DELETE FROM privkey WHERE key_id=?', (new_uuid,))
@@ -59,7 +63,7 @@ class KeyDb:
                 )
         c.execute('INSERT INTO privkey (key_id, key_unlock_key_id, key_unlock_password, key) \
                 VALUES (?, ?, ?, ?)',
-                (new_uuid, parent_key_id, None, key_priv.exportKey(passphrase=password),)
+                (new_uuid, parent_key_id, store_password, key_priv.exportKey(passphrase=password),)
                 )
 
         return new_uuid
@@ -77,16 +81,61 @@ class KeyDb:
         pass
 
     def Encrypt(self,key_id,data):
-        pass
+        # RSA PubKey Encryption of data
+
+        # fetch public key
+        c = self._conn.cursor()
+        c.execute('SELECT key FROM pubkey WHERE key_id = ? AND key_expiry > datetime(\'now\')', (key_id,))
+        row = c.fetchone()
+        key_pub = None
+        if not row:
+            raise ValueError("Key not found in database")
+
+        # create RSA key object
+        key_pub = Crypto.PublicKey.RSA.importKey(row[0])
+
+        # RSA encryption
+        cipher = Crypto.Cipher.PKCS1_OAEP.new(key_pub, hashAlgo=Crypto.Hash.SHA256)
+        message = cipher.encrypt(data.encode('utf-8'))
+        return message
 
     def Decrypt(self,key_id,password,data):
-        pass
+        # RSA PubKey Decryption of data
+
+        # fetch public key
+        c = self._conn.cursor()
+        c.execute('SELECT key FROM privkey WHERE key_id = ?', (key_id,))
+        row = c.fetchone()
+        key_priv = None
+        if not row:
+            raise ValueError("Key not found in database")
+
+        # create RSA key object
+        key = row[0]
+        key_priv = Crypto.PublicKey.RSA.importKey(key,passphrase=password)
+        if not key_priv:
+            raise ValueError("Key could not be loaded, bad password?")
+
+        # RSA encryption
+        cipher = Crypto.Cipher.PKCS1_OAEP.new(key_priv, hashAlgo=Crypto.Hash.SHA256)
+        message = cipher.decrypt(data)
+        return message.decode('utf-8')
 
     def Sign(self,key_id,password,data):
         pass
 
     def Verify(self,key_id,data):
         pass
+
+    def KeyPassword(self,key_id):
+        # return the password stored in the db for the key (should be encrypted)
+        c = self._conn.cursor()
+        c.execute('SELECT key_unlock_password FROM privkey WHERE key_id = ?', (key_id,))
+        row = c.fetchone()
+        if not row:
+            return None
+        else:
+            return base64.standard_b64decode(row[0])
 
     def _Upgrade(self,current_db_version):
 
@@ -99,7 +148,6 @@ class KeyDb:
 
             c.execute('PRAGMA database_list')
             dbpath = c.fetchone()[2]
-            print(dbpath)
 
             # back up DB before modifying
             # lock the entire DB
@@ -180,18 +228,17 @@ class KeyPw:
         for i in range(length):
             new_password.append(Crypto.Random.random.choice(self.pwchars))
         newpw = ''.join(new_password)
-        return newpw.encode('utf-8')
+        return newpw
 
     def SessionEncrypt(self,plainpw):
         cipher = Crypto.Cipher.PKCS1_OAEP.new(self._session_key_pub, hashAlgo=Crypto.Hash.SHA256)
-        # need to encode to UTF-8 as cipher.encrypt works on byte objects
-        message = cipher.encrypt(plainpw)
+        message = cipher.encrypt(plainpw.encode('utf-8'))
         return message
 
     def SessionDecrypt(self,encpw):
         cipher = Crypto.Cipher.PKCS1_OAEP.new(self._session_key_priv, hashAlgo=Crypto.Hash.SHA256)
         message = cipher.decrypt(encpw)
-        return message
+        return message.decode('utf-8')
 
 def db_create(dbpath):
 
