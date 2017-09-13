@@ -3,6 +3,7 @@
 
 import sys
 import os
+import getpass
 
 # add ./libs/ to module path
 sys.path.append(os.path.join(sys.path[0],'libs'))
@@ -25,11 +26,12 @@ import key
 keydb_path = configdb.Get('keydb.path',os.path.join(sys.path[0],'keydb.sqlite'))
 keydb = key.KeyDb(keydb_path)
 
+# KeyPw creates an ephemeral 1024 bit RSA key for encrypting passwords in memory
 keypw = key.KeyPw()
 
 master_key_id = configdb.Get('keydb.master.id',None)
+master_password = None
 
-import getpass
 if not master_key_id:
     print("Creating new Master Key")
     master_password = keypw.SessionEncrypt(getpass.getpass(prompt='New Master Key Password: '))
@@ -39,6 +41,8 @@ else:
     master_password = keypw.SessionEncrypt(getpass.getpass(prompt='Enter Master Key Password: '))
 
 node_key_id = configdb.Get('keydb.node.id',None)
+node_password = None
+
 if not node_key_id:
     print("Creating new Node Key")
     node_password = keypw.SessionEncrypt(keypw.New())
