@@ -10,6 +10,7 @@ import os
 import threading
 import multiprocessing
 import queue
+import json
 
 # add ./libs/ to module path
 sys.path.append(os.path.join(sys.path[0],'libs'))
@@ -33,7 +34,7 @@ def _CreateWorkerQueueKey(self):
     keychars = list('! #$%&()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[]^_`abcdefghijklmnopqrstuvwxyz{|}~')
     new_key = []
     for i in range(16):
-        new_key.append(random.choice(keychars))
+        new_key.append(random.choice(keychars)) # key just needs to be unique, isn't being used for auth
     key = ''.join(new_key)
     found_in_queue=0
     with worker_queue_lock:
@@ -62,7 +63,7 @@ def _Worker():
 
         # dequeue item
         item = queue.get()
-            queue_item = []
+        queue_item = []
 
         # update worker status with item
         with worker_status_lock:
@@ -108,29 +109,41 @@ from http.server import SimpleHTTPRequestHandler, HTTPServer
 class ThreadingSimpleServer(ThreadingMixIn, HTTPServer):
     pass
 
-def status():
-    pass
+def status(data):
+    print('status')
+    print(data)
+    return 401, {'foo': 'bar'}
 
+# dictionary of URL: function mapping, used by HTTP RequestHandler
 request_dictionary = {
     '/status': status,
 }
 
 class RequestHandler(SimpleHTTPRequestHandler):
     # handler for HTTP server
-    def _handle_request(self):
-        print('handle it!')
+    def _handle_request(self,data):
         request_path = self.path
-        self.send_response(404)
-        self.send_header('Content-Type', 'application/json')
+        self.send_header('Content-Type', 'application/json') # we only speak JSON here
+
+        # check that we know how to handle the requested URL
+        if request_path not in request_dictionary.keys():
+            self.send_response(404)
+            self.end_headers()
+            return
+
+        code, response = request_dictionary[request_path](data)
+        self.send_response(code)
         self.end_headers()
-        return
+        self.wfile.write(json.dumps(response).encode('utf-8'))
+
 
     def do_POST(self):
-        self._handle_request()
+        data_string = self.rfile.read(int(self.headers['Content-Length']))
+        self._handle_request(json.loads(data_string.decode('utf-8')))
         return
 
     def do_GET(self):
-        self._handle_request()
+        self._handle_request(None)
         return
 
     def do_HEAD(self):
