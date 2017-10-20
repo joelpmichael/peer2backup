@@ -1,4 +1,6 @@
 # -*- coding: utf_8 -*-
+# vim: tabstop=8 expandtab shiftwidth=4 softtabstop=4
+
 
 # Crypto Key Database
 
@@ -15,21 +17,23 @@ import Crypto.Random.random
 import Crypto.Cipher.PKCS1_OAEP
 import Crypto.Hash.SHA256
 
-# increment ConfigDbVersion on DB schema changes
+# increment keydb_version on DB schema changes
 keydb_version = 2017090101
 
 # main key db
 class KeyDb:
     def __init__(self,dbpath):
 
+        self._dbpath = dbpath
+
         # create new DB if it doesn't exist
-        if not os.path.isfile(dbpath):
-            db_create(dbpath)
+        if not os.path.isfile(self._dbpath):
+            db_create(self._dbpath)
 
         # connect to db
-        self._conn = sqlite3.connect(dbpath)
-        self._conn.isolation_level = None
-        c = self._conn.cursor()
+        conn = sqlite3.connect(self._dbpath)
+        conn.isolation_level = None
+        c = conn.cursor()
         # enable cell size checking
         c.execute('PRAGMA cell_size_check = 1')
         # optimize and quick-check on open
@@ -43,11 +47,14 @@ class KeyDb:
         # perform upgrade if necessary
         c.execute('PRAGMA user_version')
         current_db_version = c.fetchone()[0]
+        conn.close()
         if current_db_version < keydb_version:
             self._Upgrade(current_db_version)
 
     def New(self,parent_key_id=None,bits=2048,password=None,expiry='+2 years'):
-        c = self._conn.cursor()
+        conn = sqlite3.connect(self._dbpath)
+        conn.isolation_level = None
+        c = conn.cursor()
         new_uuid = str(uuid.uuid4())
         key_priv = Crypto.PublicKey.RSA.generate(bits)
         key_pub = key_priv.publickey()
@@ -66,25 +73,46 @@ class KeyDb:
                 (new_uuid, parent_key_id, store_password, key_priv.exportKey(passphrase=password),)
                 )
 
+        conn.close()
         return new_uuid
     
     def Del(self,key_id):
-        pass
+        conn = sqlite3.connect(self._dbpath)
+        conn.isolation_level = None
+        c = conn.cursor()
+        conn.close()
 
     def Check(self,key_id):
+        conn = sqlite3.connect(self._dbpath)
+        conn.isolation_level = None
+        c = conn.cursor()
+        conn.close()
+
+    def HttpImport(self,data):
+        pass
+
+    def HttpExport(self,data):
         pass
 
     def ImportPubkey(self,key_id,key):
-        pass
+        conn = sqlite3.connect(self._dbpath)
+        conn.isolation_level = None
+        c = conn.cursor()
+        conn.close()
 
     def ExportPubkey(self,key_id):
-        pass
+        conn = sqlite3.connect(self._dbpath)
+        conn.isolation_level = None
+        c = conn.cursor()
+        conn.close()
 
     def Encrypt(self,key_id,data):
         # RSA PubKey Encryption of data
 
         # fetch public key
-        c = self._conn.cursor()
+        conn = sqlite3.connect(self._dbpath)
+        conn.isolation_level = None
+        c = conn.cursor()
         c.execute('SELECT key FROM pubkey WHERE key_id = ? AND key_expiry > datetime(\'now\')', (key_id,))
         row = c.fetchone()
         key_pub = None
@@ -97,13 +125,16 @@ class KeyDb:
         # RSA encryption
         cipher = Crypto.Cipher.PKCS1_OAEP.new(key_pub, hashAlgo=Crypto.Hash.SHA256)
         message = cipher.encrypt(data.encode('utf-8'))
+        conn.close()
         return message
 
     def Decrypt(self,key_id,password,data):
         # RSA PubKey Decryption of data
 
         # fetch public key
-        c = self._conn.cursor()
+        conn = sqlite3.connect(self._dbpath)
+        conn.isolation_level = None
+        c = conn.cursor()
         c.execute('SELECT key FROM privkey WHERE key_id = ?', (key_id,))
         row = c.fetchone()
         key_priv = None
@@ -119,19 +150,30 @@ class KeyDb:
         # RSA encryption
         cipher = Crypto.Cipher.PKCS1_OAEP.new(key_priv, hashAlgo=Crypto.Hash.SHA256)
         message = cipher.decrypt(data)
+        conn.close()
         return message.decode('utf-8')
 
     def Sign(self,key_id,password,data):
-        pass
+        conn = sqlite3.connect(self._dbpath)
+        conn.isolation_level = None
+        c = conn.cursor()
+        conn.close()
 
     def Verify(self,key_id,data):
-        pass
+        conn = sqlite3.connect(self._dbpath)
+        conn.isolation_level = None
+        c = conn.cursor()
+        conn.close()
 
     def KeyPassword(self,key_id):
         # return the password stored in the db for the key (should be encrypted)
-        c = self._conn.cursor()
+        conn = sqlite3.connect(self._dbpath)
+        conn.isolation_level = None
+        c = conn.cursor()
         c.execute('SELECT key_unlock_password FROM privkey WHERE key_id = ?', (key_id,))
         row = c.fetchone()
+        conn.close()
+
         if not row:
             return None
         else:
@@ -140,7 +182,9 @@ class KeyDb:
     def _Upgrade(self,current_db_version):
 
         # connect to DB handle
-        c = self._conn.cursor()
+        conn = sqlite3.connect(self._dbpath)
+        conn.isolation_level = None
+        c = conn.cursor()
 
         # current_db_version == 0 means DB is brand new
         # If not brand new, back it up and perform full checks
@@ -196,7 +240,6 @@ class KeyDb:
 
         # version 2017090101
         # initial version
-        # simple key,value table
         if current_db_version < 2017090101:
             c.execute('CREATE TABLE privkey (key_id TEXT PRIMARY KEY NOT NULL, key TEXT, key_unlock_key_id TEXT, key_unlock_password TEXT)')
             c.execute('CREATE TABLE pubkey (key_id TEXT PRIMARY KEY NOT NULL, key TEXT, key_expiry TEXT)')
@@ -206,12 +249,13 @@ class KeyDb:
         # End of upgrades, run an optimize and vacuum too
         c.execute('PRAGMA optimize')
         c.execute('VACUUM')
+        conn.close()
 
 # in-memory password storage scrambling function for key passwords
 class KeyPw:
     def __init__(self):
         # possible characters for randomly-generated passwords (typable ASCII)
-        self.pwchars = list('! #$%&()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[]^_`abcdefghijklmnopqrstuvwxyz{|}~')
+        self.pwchars = list('~!@#$%^&*()_+1234567890-=QWERTYUIOP{}|qwertyuiop[]\\ASDFGHJKL:"asdfghjkl;\'ZXCVBNM<>?zxcvbnm,./ ')
 
         # create RSA key pair to use during this session to encrypt key passwords
         self._session_key_priv = Crypto.PublicKey.RSA.generate(1024)
@@ -256,6 +300,5 @@ def db_create(dbpath):
     c.execute('PRAGMA encoding = "UTF-8"')
     # vacuum to make page size stick
     c.execute('VACUUM')
-    conn.close
+    conn.close()
 
-# vim: tabstop=8 expandtab shiftwidth=4 softtabstop=4

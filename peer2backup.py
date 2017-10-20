@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf_8 -*-
+# vim: tabstop=8 expandtab shiftwidth=4 softtabstop=4
+
 
 # FIFO queue server for peer2backup
 # JSON HTTP server for enqueue
@@ -26,12 +28,21 @@ args = parser.parse_args()
 
 # load configuration
 import config
-configdb_path = config.File(args.config)
-http_port = config.ConfigDb(configdb_path).Get('http.server.port',9336)
-num_worker_threads = config.ConfigDb(configdb_path).Get('worker.threads.count',multiprocessing.cpu_count())
+configdb_path = config.ConfigFile(args.config)
+configdb = config.ConfigDb(configdb_path)
+http_port = configdb.Get('http.server.port',9336)
+num_worker_threads = configdb.Get('worker.threads.count',multiprocessing.cpu_count())
+
+import key
+keydb_path = configdb.Get('keydb.path',os.path.join(sys.path[0],'keydb.sqlite'))
+keydb = key.KeyDb(keydb_path)
+
+import auth
+authdb_path = configdb.Get('authdb.path',os.path.join(sys.path[0],'authdb.sqlite'))
+authdb = auth.AuthDb(authdb_path)
 
 def _CreateWorkerQueueKey(self):
-    keychars = list('! #$%&()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[]^_`abcdefghijklmnopqrstuvwxyz{|}~')
+    keychars = list('~!@#$%^&*()_+1234567890-=QWERTYUIOP{}|qwertyuiop[]\\ASDFGHJKL:"asdfghjkl;\'ZXCVBNM<>?zxcvbnm,./ ') # typable ASCII characters
     new_key = []
     for i in range(16):
         new_key.append(random.choice(keychars)) # key just needs to be unique, isn't being used for auth
@@ -86,16 +97,39 @@ def _Worker():
 
         queue.task_done()
 
-# start threads
+# start worker threads
 for i in range(num_worker_threads):
     t = threading.Thread(target=_Worker)
     t.daemon = True
     t.start()
 
+def http_status(data):
+    # status handler
+    # for now, just prints status, prints out data arguments, and says 200 ok
+    print('status')
+    print(data)
+    return 200, None
+
+
+# dictionary of URL: function mapping
+# used by HTTP RequestHandler to determine valid paths
+# used by Cron to run scheduled jobs
+request_dictionary = {
+    '/status': http_status,
+    '/key/import': keydb.HttpImport,
+    '/key/export': keydb.HttpExport,
+    '/auth/token': authdb.HttpToken,
+}
+
+import scheduler
 # set up scheduled task queuing thread
 def _Cron():
+    scheddb_path = configdb.Get('scheddb.path',os.path.join(sys.path[0],'scheddb.sqlite'))
+    sched = scheduler.Scheduler(scheddb_path)
     while True:
-        pass
+        sched.Sleep()
+        for job,data in sched.Tasks():
+            code, response = request_dictionary[job](data)
 
 # start scheduled task queuing thread
 t = threading.Thread(target=_Cron)
@@ -109,19 +143,10 @@ from http.server import SimpleHTTPRequestHandler, HTTPServer
 class ThreadingSimpleServer(ThreadingMixIn, HTTPServer):
     pass
 
-def status(data):
-    print('status')
-    print(data)
-    return 401, {'foo': 'bar'}
-
-# dictionary of URL: function mapping, used by HTTP RequestHandler
-request_dictionary = {
-    '/status': status,
-}
-
 class RequestHandler(SimpleHTTPRequestHandler):
     # handler for HTTP server
     def _handle_request(self,data):
+
         request_path = self.path
         self.send_header('Content-Type', 'application/json') # we only speak JSON here
 

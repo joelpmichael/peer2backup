@@ -1,52 +1,16 @@
 # -*- coding: utf_8 -*-
 # vim: tabstop=8 expandtab shiftwidth=4 softtabstop=4
 
-# configdb
-# database of key=value pairs for configuration
-# values are stored as JSON for complex data type value storage
-
-# FIXME - error handling!
+# auth
+# queues tasks when needed to run
 
 import os
-import sys
-
-import configparser
 import sqlite3
 
-import shutil
-import json
+# increment authdb_version on DB schema changes
+authdb_version = 2017090101
 
-# increment configdb_version on DB schema changes
-configdb_version = 2017090101
-
-# reads config file to discover location of config database
-# default configdb is ./configdb.sqlite
-
-# db path should be only setting in config file
-# everything else should be in configdb
-
-def ConfigFile(configfile):
-
-    config = configparser.ConfigParser()
-
-    # default path to config db is ./configdb.sqlite
-    default_configdb_path = os.path.join(sys.path[0],'configdb.sqlite')
-
-    config.read(configfile)
-
-    if not 'db' in config:
-        config['db'] = {}
-        config['db']['path'] = default_configdb_path
-
-    configdb_path = config['db'].get('path',default_configdb_path)
-    with open(configfile, 'w') as cfgfile:
-        config.write(cfgfile)
-    cfgfile.close
-
-    return configdb_path
-
-# main config db
-class ConfigDb:
+class AuthDb:
     def __init__(self,dbpath):
 
         self._dbpath = dbpath
@@ -56,7 +20,6 @@ class ConfigDb:
             db_create(self._dbpath)
 
         # connect to db
-
         conn = sqlite3.connect(self._dbpath)
         conn.isolation_level = None
         c = conn.cursor()
@@ -74,36 +37,11 @@ class ConfigDb:
         c.execute('PRAGMA user_version')
         current_db_version = c.fetchone()[0]
         conn.close()
-        if current_db_version < configdb_version:
+        if current_db_version < authdb_version:
             self._Upgrade(current_db_version)
 
-
-    def Set(self,key,val):
-        # set a configdb key to value
-        # blind-delete and insert to ensure that
-        # missing keys are added and duplicate keys (if any) are removed
-        jsonval=json.dumps(val)
-        conn = sqlite3.connect(self._dbpath)
-        conn.isolation_level = None
-        c = conn.cursor()
-        c.execute('DELETE FROM config WHERE cfg_key=?', (key,))
-        c.execute('INSERT INTO config (cfg_key, cfg_value) VALUES (?, ?)', (key, jsonval,))
-        conn.close()
-
-    def Get(self,key,defaultval):
-        # get a configdb value
-        # if the value doesn't exist, insert & return the default value
-        conn = sqlite3.connect(self._dbpath)
-        conn.isolation_level = None
-        c = conn.cursor()
-        c.execute('SELECT cfg_value FROM config WHERE cfg_key=?', (key,))
-        dbrow=c.fetchone()
-        conn.close()
-        if dbrow:
-            return json.loads(dbrow[0])
-        else:
-            self.Set(key,defaultval)
-            return defaultval
+    def HttpToken():
+        pass
 
     def _Upgrade(self,current_db_version):
 
@@ -127,6 +65,7 @@ class ConfigDb:
             # write some data to obtain an exclusive lock
             c.execute('CREATE TABLE __temp_upgrade (temp INT)')
             c.execute('INSERT INTO __temp_upgrade (temp) values (1)')
+            c.execute('SELECT * FROM __temp_upgrade')
             c.execute('DROP TABLE __temp_upgrade')
             c.execute('PRAGMA query_only = 1')
 
@@ -139,6 +78,7 @@ class ConfigDb:
             c.execute('PRAGMA locking_mode = NORMAL')
             c.execute('CREATE TABLE __temp_upgrade (temp INT)')
             c.execute('INSERT INTO __temp_upgrade (temp) values (1)')
+            c.execute('SELECT * FROM __temp_upgrade')
             c.execute('DROP TABLE __temp_upgrade')
 
             # perform integrity check
@@ -150,7 +90,7 @@ class ConfigDb:
         # perform upgrades
         # IMPORTANT: upgrades are performed IN ORDER
         # remember to set current_db_version to the new version
-    
+
         # Example:
         #if current_db_version < 2017090101:
         #    c.execute('CREATE TABLE foo(bar INT, baz TEXT)')
@@ -164,9 +104,9 @@ class ConfigDb:
 
         # version 2017090101
         # initial version
-        # simple key,value table
         if current_db_version < 2017090101:
-            c.execute('CREATE TABLE config (cfg_key TEXT PRIMARY KEY NOT NULL, cfg_value TEXT)')
+            c.execute('CREATE TABLE cron (cron_id TEXT PRIMARY KEY NOT NULL, cron_minute TEXT, cron_hour TEXT, cron_mday TEXT, cron_month TEXT, cron_wday TEXT, cron_command TEXT, cron_args TEXT)')
+            c.execute('CREATE TABLE at (at_id TEXT PRIMARY KEY NOT NULL, at_time TEXT, at_command TEXT, at_args TEXT)')
             c.execute('PRAGMA user_version = 2017090101')
             current_db_version = 2017090101
 
