@@ -2,7 +2,12 @@
 # vim: tabstop=8 expandtab shiftwidth=4 softtabstop=4
 
 # auth
-# queues tasks when needed to run
+# API access authentication token handling
+
+# token request:
+# master_key_id = master key ID
+# nonce = random 32-character string
+# signature = RSA signature of nonce using master key
 
 import os
 import sqlite3
